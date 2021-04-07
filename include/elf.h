@@ -69,7 +69,7 @@ struct program_header{
 	uint64_t physical_address;
 	uint64_t file_size;
 	uint64_t memory_size;
-	uint64_t alignment;
+	uint64_t align;
 }__attribute__((packed));
 typedef struct program_header program_header_t;
 
