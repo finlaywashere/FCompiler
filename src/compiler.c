@@ -1,4 +1,4 @@
-#include <elf.h>
+#include <compiler.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -93,43 +93,118 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 uint64_t get_instruction_length(char* str){
 	//TODO: Find instruction length for string
 	if(!memcmp(str,"mov",3)){
-		return 5;
+		 for(uint64_t i = 4; i < strlen(str); i++){
+			if(str[i] == ',' || i == strlen(str)-1){
+				// Remove leading tabs and spaces
+				uint64_t new_index = 4;
+				for(; new_index < i; new_index++){
+					if(str[new_index] != ' ' && str[new_index] != '\t') break;
+				}
+				char* str2 = (char*)(((uint64_t)str)+new_index);
+				uint64_t type = get_register_size(str2);
+				if(type == 0)
+					return 2;
+				if(type == 1)
+					return 3;
+				if(type == 2)
+					return 5;
+				if(type == 3)
+					return 9;
+			}
+		}
 	}
 	if(!memcmp(str,"ret",3)){
 		return 1;
 	}
 	return 0;
 }
-uint64_t get_register_num(char* reg){
-	if(!memcmp(reg,"eax",3))
-		return 0;
-	if(!memcmp(reg,"ecx",3))
-		return 1;
-	if(!memcmp(reg,"edx",3))
+// 0 = 8 bit
+// 1 = 16 bit
+// 2 = 32 bit
+// 3 = 64 bit
+uint64_t get_register_size(char* reg){
+	char first = reg[0];
+	char second = reg[1];
+	if(first <= 'Z')
+		first += 'z'-'Z';
+	if(second <= 'Z')
+		second += 'z'-'Z';
+	if(first == 'e')
 		return 2;
-	if(!memcmp(reg,"ebx",3))
-		return 3;
-	if(!memcmp(reg,"esp",3))
-		return 4;
-	if(!memcmp(reg,"ebp",3))
-		return 5;
-	if(!memcmp(reg,"esi",3))
-		return 6;
-	if(!memcmp(reg,"edi",3))
-		return 7;
+	if(second == 'l')
+		return 0;
+	if(second == 'x')
+		return 1;
+	if(first == 'r'){
+		if(second >= 'a') return 3; // rax, rbx, rcx, etc
+		char third = reg[2];
+		if(third <= 'Z')
+			third += 'z'-'Z';
+		if(third == 'l') return 0;
+		if(third == 'x') return 1;
+		if(third == 'd') return 2;
+		if(third >= '0' && third <= '5'){
+			char fourth = reg[3];
+			if(fourth <= 'Z')
+				fourth += 'z'-'Z';
+			if(fourth == 'l') return 0;
+			if(fourth == 'x') return 1;
+			if(fourth == 'd') return 2;
+			return 3; // Its 64 bit if theres no suffix
+		}else{
+			return 3; // r8, or r9 with no suffix
+		}
+	}
+	return 0; // No register found
+}
+uint64_t get_register_num(char* reg){
+	char identifier = reg[0];
+	char next = reg[1];
+	if(identifier <= 90)
+		identifier += 32;
+	if(identifier == 'e' || identifier == 'r'){
+		identifier = reg[1];
+		if(identifier <= 90)
+			identifier += 32;
+		next = reg[2];
+		if(next <= 90)
+			next += 32;
+	}
+	if(next == 'i'){
+		if(identifier == 's') return 6;
+		if(identifier == 'd') return 7;
+	}else if(next == 'p'){
+		if(identifier == 's') return 4;
+		if(identifier == 'b') return 5;
+	}else{
+		if(identifier == 'a') return 0;
+		if(identifier == 'c') return 1;
+		if(identifier == 'd') return 2;
+		if(identifier == 'b') return 3;
+		// This could be done with an atoi
+		if(identifier == '8') return 8;
+		if(identifier == '9') return 9;
+		if(identifier == '1' && reg[2] == '0') return 10;
+		if(identifier == '1' && reg[2] == '1') return 11;
+		if(identifier == '1' && reg[2] == '2') return 12;
+		if(identifier == '1' && reg[2] == '3') return 13;
+		if(identifier == '1' && reg[2] == '4') return 14;
+		if(identifier == '1' && reg[2] == '5') return 15;
+	}
 	return 0;
 }
 void parse_and_write_instruction(char* str, uint8_t* buffer){
-	//TODO: Support more registers
 	if(!memcmp(str,"ret",3)){
 		buffer[0] = 0xC3;
 	}
 	if(!memcmp(str,"mov",3)){
 		uint64_t reg = 0;
 		uint64_t val = 0;
-		
+		uint64_t type = 0;
+
 		uint64_t count = 0;
 		uint64_t index = 4;
+		
 		for(uint64_t i = 4; i < strlen(str); i++){
 			if(str[i] == ',' || i == strlen(str)-1){
 				// Remove leading tabs and spaces
@@ -140,6 +215,7 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 				char* str2 = (char*)(((uint64_t)str)+new_index);
 				if(count == 0){
 					reg = get_register_num(str2);
+					type = get_register_size(str2);
 				}else if(count == 1){
 					if(!memcmp(str2,"0x",2)){
 						// Hex
@@ -156,11 +232,24 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 				count++;
 			}
 		}
-		buffer[0] = 0xb8 + reg;
+		if(type == 0)
+			buffer[0] = 0xb0 + reg;
+		if(type == 1 || type == 2)
+			buffer[0] = 0xb8 + reg;
+
 		buffer[1] = (uint8_t) val;
-		buffer[2] = (uint8_t) (val >> 8);
-		buffer[3] = (uint8_t) (val >> 16);
-		buffer[4] = (uint8_t) (val >> 24);
+		if(type >= 1)
+			buffer[2] = (uint8_t) (val >> 8);
+		if(type >= 2){
+			buffer[3] = (uint8_t) (val >> 16);
+			buffer[4] = (uint8_t) (val >> 24);
+		}
+		if(type == 3){
+			buffer[5] = (uint8_t) (val >> 32);
+			buffer[6] = (uint8_t) (val >> 40);
+			buffer[7] = (uint8_t) (val >> 48);
+			buffer[8] = (uint8_t) (val >> 56);
+		}
 	}
 	return;
 }
