@@ -61,19 +61,19 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 		name_index += strlen((char*) (((uint64_t) names) + name_index)) + 1;
 	}
 
-	programs[SEGMENTS-2].type = PROGRAM_LOAD;
-	programs[SEGMENTS-2].offset = file_offset;
-	programs[SEGMENTS-2].virtual_address = file_offset;
-	programs[SEGMENTS-2].file_size = data_length;
-	programs[SEGMENTS-2].memory_size = data_length;
-	programs[SEGMENTS-2].flags = 0x5;
-	programs[SEGMENTS-2].align = 0x1000;
+	programs[0].type = PROGRAM_LOAD;
+	programs[0].offset = file_offset;
+	programs[0].virtual_address = file_offset;
+	programs[0].file_size = data_length;
+	programs[0].memory_size = data_length;
+	programs[0].flags = 0x5;
+	programs[0].align = 0x1000;
 	
-	segments[SEGMENTS-1].type = SEGMENT_PROGRAM;
-	segments[SEGMENTS-1].flags = SEGMENT_FLAG_EXEC | SEGMENT_FLAG_ALLOC;
-	segments[SEGMENTS-1].mem_address = file_offset;
-	segments[SEGMENTS-1].file_offset = file_offset;
-	segments[SEGMENTS-1].file_size = data_length;
+	segments[1].type = SEGMENT_PROGRAM;
+	segments[1].flags = SEGMENT_FLAG_EXEC | SEGMENT_FLAG_ALLOC;
+	segments[1].mem_address = file_offset;
+	segments[1].file_offset = file_offset;
+	segments[1].file_size = data_length;
 
 	segments[2].type = SEGMENT_STRINGS;
 	segments[2].flags = SEGMENT_FLAG_STRINGS;
@@ -100,6 +100,25 @@ uint64_t get_instruction_length(char* str){
 	}
 	return 0;
 }
+uint64_t get_register_num(char* reg){
+	if(!memcmp(reg,"eax",3))
+		return 0;
+	if(!memcmp(reg,"ecx",3))
+		return 1;
+	if(!memcmp(reg,"edx",3))
+		return 2;
+	if(!memcmp(reg,"ebx",3))
+		return 3;
+	if(!memcmp(reg,"esp",3))
+		return 4;
+	if(!memcmp(reg,"ebp",3))
+		return 5;
+	if(!memcmp(reg,"esi",3))
+		return 6;
+	if(!memcmp(reg,"edi",3))
+		return 7;
+	return 0;
+}
 void parse_and_write_instruction(char* str, uint8_t* buffer){
 	//TODO: Support more registers
 	if(!memcmp(str,"ret",3)){
@@ -110,16 +129,28 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 		uint64_t val = 0;
 		
 		uint64_t count = 0;
-		uint64_t index = 0;
-		for(uint64_t i = 3; i < strlen(str); i++){
+		uint64_t index = 4;
+		for(uint64_t i = 4; i < strlen(str); i++){
 			if(str[i] == ',' || i == strlen(str)-1){
-				char* str2 = (char*)(((uint64_t)str)+index);
+				// Remove leading tabs and spaces
+				uint64_t new_index = index;
+				for(; new_index < i; new_index++){
+					if(str[new_index] != ' ' && str[new_index] != '\t') break;
+				}
+				char* str2 = (char*)(((uint64_t)str)+new_index);
 				if(count == 0){
-					if(!memcmp(str2,"eax",3)){
-						reg = 0;
-					}
+					reg = get_register_num(str2);
 				}else if(count == 1){
-					val = strtol(str2,NULL,10);
+					if(!memcmp(str2,"0x",2)){
+						// Hex
+						val = strtol((char*)(((uint64_t)str2)+2),NULL,16);
+					}else if(!memcmp(str2,"0b",2)){
+						// Binary
+						val = strtol((char*)(((uint64_t)str2)+2),NULL,2);
+					}else{
+						// Decimal
+						val = strtol(str2,NULL,10);
+					}
 				}
 				index = i + 1;
 				count++;
@@ -156,20 +187,22 @@ int main(){
 		}
 	}
 	index = 0;
+	uint64_t inst_index = 0;
 	uint8_t* bin_buffer = malloc(bin_len);
 	for(uint64_t i = 0; i < len; i++){
-                if(buffer[i] == '\n' || i == len - 1){
-                        uint64_t tmp_len = i - index;
-                        char* str = malloc(tmp_len);
-                        memcpy(str,(char*)(((uint64_t)buffer)+index),tmp_len);
-                        parse_and_write_instruction(str,(uint8_t*)(((uint64_t)bin_buffer)+index));
+		if(buffer[i] == '\n' || i == len - 1){
+			uint64_t tmp_len = i - index;
+			char* str = malloc(tmp_len);
+			memcpy(str,(char*)(((uint64_t)buffer)+index),tmp_len);
+			parse_and_write_instruction(str,(uint8_t*)(((uint64_t)bin_buffer)+inst_index));
 			index = i+1;
-                }
-        }
+			inst_index += get_instruction_length(str);
+		}
+	}
 	
 	uint64_t elen = elf_length(len);
 	uint8_t* elf_buffer = malloc(elen);
-	create_elf(elf_buffer,bin_buffer,len);
+	create_elf(elf_buffer,bin_buffer,bin_len);
 
 	FILE* fd = fopen("test.elf","w+");
 	fwrite(elf_buffer,elen,1,fd);
