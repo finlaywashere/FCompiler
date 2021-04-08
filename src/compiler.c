@@ -105,11 +105,11 @@ uint64_t get_instruction_length(char* str){
 				if(type == 0)
 					return 2;
 				if(type == 1)
-					return 3;
+					return 4; // Factor in prefix length
 				if(type == 2)
 					return 5;
 				if(type == 3)
-					return 9;
+					return 10; // Factor in prefix length
 			}
 		}
 	}
@@ -232,23 +232,34 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 				count++;
 			}
 		}
+		uint64_t start = 1;
 		if(type == 0)
 			buffer[0] = 0xb0 + reg;
-		if(type == 1 || type == 2)
+		if(type == 1){
+			buffer[0] = 0x66; // cs.d prefix
+			buffer[1] = 0xb8 + reg;
+			start++;
+		}
+		if(type == 2)
 			buffer[0] = 0xb8 + reg;
+		if(type == 3){
+			buffer[0] = 0x48; // movabs prefix
+			buffer[1] = 0xb8 + reg;
+			start++;
+		}
 
-		buffer[1] = (uint8_t) val;
+		buffer[start] = (uint8_t) val;
 		if(type >= 1)
-			buffer[2] = (uint8_t) (val >> 8);
+			buffer[start+1] = (uint8_t) (val >> 8);
 		if(type >= 2){
-			buffer[3] = (uint8_t) (val >> 16);
-			buffer[4] = (uint8_t) (val >> 24);
+			buffer[start+2] = (uint8_t) (val >> 16);
+			buffer[start+3] = (uint8_t) (val >> 24);
 		}
 		if(type == 3){
-			buffer[5] = (uint8_t) (val >> 32);
-			buffer[6] = (uint8_t) (val >> 40);
-			buffer[7] = (uint8_t) (val >> 48);
-			buffer[8] = (uint8_t) (val >> 56);
+			buffer[start+4] = (uint8_t) (val >> 32);
+			buffer[start+5] = (uint8_t) (val >> 40);
+			buffer[start+6] = (uint8_t) (val >> 48);
+			buffer[start+7] = (uint8_t) (val >> 56);
 		}
 	}
 	return;
