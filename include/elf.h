@@ -50,14 +50,14 @@ struct elf_header{
 	uint32_t elf_version_2;
 	uint64_t entry_point;
 	uint64_t program_header;
-	uint64_t section_header;
+	uint64_t segment_header;
 	uint32_t flags;
 	uint16_t header_size;
 	uint16_t program_header_size;
 	uint16_t num_program_headers;
-	uint16_t section_header_size;
-	uint16_t num_section_headers;
-	uint16_t section_header_name_index;
+	uint16_t segment_header_size;
+	uint16_t num_segment_headers;
+	uint16_t segment_header_name_index;
 }__attribute__((packed));
 typedef struct elf_header elf_header_t;
 
