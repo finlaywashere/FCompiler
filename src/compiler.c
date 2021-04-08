@@ -49,7 +49,7 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 	header->segment_header = 0x40 + 0x38 * PROGRAMS; // Right after program headers
 	header->num_segment_headers = SEGMENTS;
 	header->entry_point = file_offset;
-	header->segment_header_name_index = 2;
+	header->segment_header_name_index = SEGMENTS-1;
 
 	program_header_t* programs = (program_header_t*) malloc(sizeof(program_header_t)*PROGRAMS);
 	memset(programs,0,sizeof(program_header_t)*PROGRAMS);
@@ -61,19 +61,19 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 		name_index += strlen((char*) (((uint64_t) names) + name_index)) + 1;
 	}
 
-	programs[0].type = PROGRAM_LOAD;
-	programs[0].offset = file_offset;
-	programs[0].virtual_address = file_offset;
-	programs[0].file_size = data_length;
-	programs[0].memory_size = data_length;
-	programs[0].flags = 0x5;
-	programs[0].align = 0x1000;
+	programs[SEGMENTS-2].type = PROGRAM_LOAD;
+	programs[SEGMENTS-2].offset = file_offset;
+	programs[SEGMENTS-2].virtual_address = file_offset;
+	programs[SEGMENTS-2].file_size = data_length;
+	programs[SEGMENTS-2].memory_size = data_length;
+	programs[SEGMENTS-2].flags = 0x5;
+	programs[SEGMENTS-2].align = 0x1000;
 	
-	segments[1].type = SEGMENT_PROGRAM;
-	segments[1].flags = SEGMENT_FLAG_EXEC | SEGMENT_FLAG_ALLOC;
-	segments[1].mem_address = file_offset;
-	segments[1].file_offset = file_offset;
-	segments[1].file_size = data_length;
+	segments[SEGMENTS-1].type = SEGMENT_PROGRAM;
+	segments[SEGMENTS-1].flags = SEGMENT_FLAG_EXEC | SEGMENT_FLAG_ALLOC;
+	segments[SEGMENTS-1].mem_address = file_offset;
+	segments[SEGMENTS-1].file_offset = file_offset;
+	segments[SEGMENTS-1].file_size = data_length;
 
 	segments[2].type = SEGMENT_STRINGS;
 	segments[2].flags = SEGMENT_FLAG_STRINGS;
