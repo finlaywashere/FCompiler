@@ -91,21 +91,34 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 	free(segments);
 }
 uint64_t get_instruction_length(instruction_t* inst){
-	//TODO: Find instruction length for string
 	if(!memcmp(&inst->name,"mov",3)){
-		uint64_t type = inst->types[0];
-		if(type == 0)
-			return 2;
-		if(type == 1)
-			return 4; // Factor in prefix length
-		if(type == 2)
-			return 5;
-		if(type == 3)
-			return 10; // Factor in prefix length
+		switch(inst->types[0]){
+			case 0:
+				return 2;
+			case 1:
+				return 4; // Factor in prefix length
+			case 2:
+				return 5;
+			case 3:
+				return 10; // Factor in prefix length
+			case 5:
+				return 2;
+		}
 	}
-	if(!memcmp(&inst->name,"ret",3)){
-		return 1;
+	if(!memcmp(&inst->name,"pop",3) || !memcmp(&inst->name,"push",4)) return 1;
+	if(!memcmp(&inst->name,"inc",3) || !memcmp(&inst->name,"dec",3)){
+		switch(inst->types[0]){
+			case 2:
+				return 2;
+			case 1:
+				return 3;
+			case 3:
+				return 3;
+			case 0:
+				return 2;
+		}
 	}
+	if(!memcmp(&inst->name,"ret",3)) return 1;
 	return 0;
 }
 // 0 = 8 bit
@@ -124,7 +137,7 @@ uint64_t get_register_size(char* reg){
 		second += 'z'-'Z';
 	if(first == 'e')
 		return 2;
-	if(second == 'l')
+	if(second == 'l' || second == 'h')
 		return 0;
 	if(second == 'x')
 		return 1;
@@ -170,10 +183,17 @@ uint64_t get_register_num(char* reg){
 		if(identifier == 's') return 4;
 		if(identifier == 'b') return 5;
 	}else{
-		if(identifier == 'a') return 0;
-		if(identifier == 'c') return 1;
-		if(identifier == 'd') return 2;
-		if(identifier == 'b') return 3;
+		if(next != 'h'){
+			if(identifier == 'a') return 0;
+			if(identifier == 'c') return 1;
+			if(identifier == 'd') return 2;
+			if(identifier == 'b') return 3;
+		}else{
+			if(identifier == 'a') return 4;
+			if(identifier == 'c') return 5;
+			if(identifier == 'd') return 6;
+			if(identifier == 'b') return 7;
+		}
 		// This could be done with an atoi
 		if(identifier == '8') return 8;
 		if(identifier == '9') return 9;
@@ -231,6 +251,52 @@ void write_instruction(instruction_t* inst, uint8_t* buffer){
 			}
 		}
 	}
+	if(!memcmp(&inst->name,"pop",3)){
+		buffer[0] = 0x58 + inst->params[0];
+	}
+	if(!memcmp(&inst->name,"push",4)){
+		buffer[0] = 0x50 + inst->params[0];
+	}
+	if(!memcmp(&inst->name,"inc",3)){
+		uint64_t start = 1;
+		if(inst->types[0] == 2){
+			buffer[0] = 0xff;
+		}
+		if(inst->types[0] == 1){
+			buffer[0] = 0x66;
+			buffer[1] = 0xff;
+			start = 2;
+		}
+		if(inst->types[0] == 3){
+			buffer[0] = 0x48;
+			buffer[1] = 0xff;
+			start = 2;
+		}
+		if(inst->types[0] == 0){
+			buffer[0] = 0xfe;
+		}
+		buffer[start] = 0xc0 + inst->params[0];
+	}
+	if(!memcmp(&inst->name,"dec",3)){
+		if(inst->types[0] == 2){
+			buffer[0] = 0xff;
+			buffer[1] = 0xc8 + inst->params[0];
+		}
+		if(inst->types[0] == 0){
+			buffer[0] = 0xfe;
+			buffer[1] = 0xc0 + inst->params[0];
+		}
+		if(inst->types[0] == 1){
+			buffer[0] = 0x66;
+			buffer[1] = 0xff;
+			buffer[2] = 0xc8 + inst->params[0];
+		}
+		if(inst->types[0] == 3){
+			buffer[0] = 0x48;
+			buffer[1] = 0xff;
+			buffer[2] = 0xc8 + inst->params[0];
+		}
+	}
 	return;
 }
 uint64_t count_instructions(char* buffer, uint64_t len){
@@ -247,6 +313,7 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len){
 	uint64_t index = 0;
 	for(uint64_t i = 0; i < len; i++){
 		if(buffer[i] == '\n' || i == len - 1){
+			memset(&inst[inst_index],0,sizeof(instruction_t));
 			uint64_t tmp_len = i - index;
 			char* str = &buffer[index];
 			uint64_t i_index = 0;
@@ -254,7 +321,7 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len){
 			for(uint64_t i2 = 0; i2 < tmp_len; i2++){
 				if((str[i2] == ' ' && i_index == 0) || str[i2] == ',' || i2 == tmp_len-1){
 					if(i_index == 0){
-						memcpy(&inst[inst_index].name,str,3);
+						memcpy(&inst[inst_index].name,str,tmp_len);
 					}else{
 						// Remove leading tabs and spaces
 						uint64_t new_index = index2;

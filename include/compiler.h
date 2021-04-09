@@ -4,7 +4,7 @@
 #include <elf.h>
 
 struct instruction{
-	char name[3];
+	char name[16];
 	uint64_t params[4];
 	uint64_t types[4];
 	uint64_t line;
