@@ -122,7 +122,10 @@ uint64_t get_instruction_length(char* str){
 // 1 = 16 bit
 // 2 = 32 bit
 // 3 = 64 bit
+// 4 = not a register
 uint64_t get_register_size(char* reg){
+	if(!memcmp(reg,"0x",2))
+		return 4;
 	char first = reg[0];
 	char second = reg[1];
 	if(first <= 'Z')
@@ -155,7 +158,7 @@ uint64_t get_register_size(char* reg){
 			return 3; // r8, or r9 with no suffix
 		}
 	}
-	return 0; // No register found
+	return 4; // No register found
 }
 uint64_t get_register_num(char* reg){
 	char identifier = reg[0];
@@ -198,9 +201,8 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 		buffer[0] = 0xC3;
 	}
 	if(!memcmp(str,"mov",3)){
-		uint64_t reg = 0;
-		uint64_t val = 0;
-		uint64_t type = 0;
+		uint64_t val[2] = {0,0};
+		uint64_t type[2] = {0,0};
 
 		uint64_t count = 0;
 		uint64_t index = 4;
@@ -213,53 +215,67 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 					if(str[new_index] != ' ' && str[new_index] != '\t') break;
 				}
 				char* str2 = (char*)(((uint64_t)str)+new_index);
-				if(count == 0){
-					reg = get_register_num(str2);
-					type = get_register_size(str2);
-				}else if(count == 1){
+				uint64_t tmp_type = get_register_size(str2);
+				if(tmp_type != 4){
+					// Register
+					val[count] = get_register_num(str2);
+					type[count] = tmp_type;
+				}else{
+					type[count] = 4; // Raw value
+					// Value	
 					if(!memcmp(str2,"0x",2)){
 						// Hex
-						val = strtol((char*)(((uint64_t)str2)+2),NULL,16);
+						val[count] = strtol((char*)(((uint64_t)str2)+2),NULL,16);
 					}else if(!memcmp(str2,"0b",2)){
 						// Binary
-						val = strtol((char*)(((uint64_t)str2)+2),NULL,2);
+						val[count] = strtol((char*)(((uint64_t)str2)+2),NULL,2);
 					}else{
 						// Decimal
-						val = strtol(str2,NULL,10);
+						val[count] = strtol(str2,NULL,10);
 					}
 				}
 				index = i + 1;
 				count++;
 			}
 		}
-		uint64_t start = 1;
-		if(type == 0)
-			buffer[0] = 0xb0 + reg;
-		if(type == 1){
-			buffer[0] = 0x66; // cs.d prefix
-			buffer[1] = 0xb8 + reg;
-			start++;
+		if(count < 2){
+			printf("Error in syntax!");
+			exit(1);
 		}
-		if(type == 2)
-			buffer[0] = 0xb8 + reg;
-		if(type == 3){
-			buffer[0] = 0x48; // movabs prefix
-			buffer[1] = 0xb8 + reg;
-			start++;
-		}
+		if(type[0] < 4 && type[1] == 4){
+			uint64_t start = 1;
+			
+			uint64_t reg = val[0];
+			uint64_t tmp_val = val[1];
 
-		buffer[start] = (uint8_t) val;
-		if(type >= 1)
-			buffer[start+1] = (uint8_t) (val >> 8);
-		if(type >= 2){
-			buffer[start+2] = (uint8_t) (val >> 16);
-			buffer[start+3] = (uint8_t) (val >> 24);
-		}
-		if(type == 3){
-			buffer[start+4] = (uint8_t) (val >> 32);
-			buffer[start+5] = (uint8_t) (val >> 40);
-			buffer[start+6] = (uint8_t) (val >> 48);
-			buffer[start+7] = (uint8_t) (val >> 56);
+			if(type[0] == 0)
+				buffer[0] = 0xb0 + reg;
+			if(type[0] == 1){
+				buffer[0] = 0x66; // cs.d prefix
+				buffer[1] = 0xb8 + reg;
+				start++;
+			}
+			if(type[0] == 2)
+				buffer[0] = 0xb8 + reg;
+			if(type[0] == 3){
+				buffer[0] = 0x48; // movabs prefix
+				buffer[1] = 0xb8 + reg;
+				start++;
+			}
+	
+			buffer[start] = (uint8_t) tmp_val;
+			if(type[0] >= 1)
+				buffer[start+1] = (uint8_t) (tmp_val >> 8);
+			if(type[0] >= 2){
+				buffer[start+2] = (uint8_t) (tmp_val >> 16);
+				buffer[start+3] = (uint8_t) (tmp_val >> 24);
+			}
+			if(type[0] == 3){
+				buffer[start+4] = (uint8_t) (tmp_val >> 32);
+				buffer[start+5] = (uint8_t) (tmp_val >> 40);
+				buffer[start+6] = (uint8_t) (tmp_val >> 48);
+				buffer[start+7] = (uint8_t) (tmp_val >> 56);
+			}
 		}
 	}
 	return;
