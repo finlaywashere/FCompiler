@@ -81,39 +81,29 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
 	segments[2].file_size = str_len;
 	
 	memcpy(buffer,header,sizeof(elf_header_t));
-	memcpy((uint8_t*) (((uint64_t)buffer)+0x40),programs,sizeof(program_header_t)*PROGRAMS);
-	memcpy((uint8_t*) (((uint64_t)buffer)+0x40+0x38*PROGRAMS),segments,sizeof(segment_header_t)*SEGMENTS);
-	memcpy((uint8_t*) (((uint64_t)buffer)+file_offset-str_len),names,str_len);
-	memcpy((uint8_t*) (((uint64_t)buffer)+file_offset),data,data_length);
+	memcpy((uint8_t*) &buffer[0x40],programs,sizeof(program_header_t)*PROGRAMS);
+	memcpy((uint8_t*) &buffer[0x40+0x38*PROGRAMS],segments,sizeof(segment_header_t)*SEGMENTS);
+	memcpy((uint8_t*) &buffer[file_offset-str_len],names,str_len);
+	memcpy((uint8_t*) &buffer[file_offset],data,data_length);
 
 	free(header);
 	free(programs);
 	free(segments);
 }
-uint64_t get_instruction_length(char* str){
+uint64_t get_instruction_length(instruction_t* inst){
 	//TODO: Find instruction length for string
-	if(!memcmp(str,"mov",3)){
-		 for(uint64_t i = 4; i < strlen(str); i++){
-			if(str[i] == ',' || i == strlen(str)-1){
-				// Remove leading tabs and spaces
-				uint64_t new_index = 4;
-				for(; new_index < i; new_index++){
-					if(str[new_index] != ' ' && str[new_index] != '\t') break;
-				}
-				char* str2 = (char*)(((uint64_t)str)+new_index);
-				uint64_t type = get_register_size(str2);
-				if(type == 0)
-					return 2;
-				if(type == 1)
-					return 4; // Factor in prefix length
-				if(type == 2)
-					return 5;
-				if(type == 3)
-					return 10; // Factor in prefix length
-			}
-		}
+	if(!memcmp(&inst->name,"mov",3)){
+		uint64_t type = inst->types[0];
+		if(type == 0)
+			return 2;
+		if(type == 1)
+			return 4; // Factor in prefix length
+		if(type == 2)
+			return 5;
+		if(type == 3)
+			return 10; // Factor in prefix length
 	}
-	if(!memcmp(str,"ret",3)){
+	if(!memcmp(&inst->name,"ret",3)){
 		return 1;
 	}
 	return 0;
@@ -196,81 +186,44 @@ uint64_t get_register_num(char* reg){
 	}
 	return 0;
 }
-void parse_and_write_instruction(char* str, uint8_t* buffer){
-	if(!memcmp(str,"ret",3)){
+void write_instruction(instruction_t* inst, uint8_t* buffer){
+	if(!memcmp(&inst->name,"ret",3)){
 		buffer[0] = 0xC3;
 	}
-	if(!memcmp(str,"mov",3)){
-		uint64_t val[2] = {0,0};
-		uint64_t type[2] = {0,0};
-
-		uint64_t count = 0;
-		uint64_t index = 4;
-		
-		for(uint64_t i = 4; i < strlen(str); i++){
-			if(str[i] == ',' || i == strlen(str)-1){
-				// Remove leading tabs and spaces
-				uint64_t new_index = index;
-				for(; new_index < i; new_index++){
-					if(str[new_index] != ' ' && str[new_index] != '\t') break;
-				}
-				char* str2 = (char*)(((uint64_t)str)+new_index);
-				uint64_t tmp_type = get_register_size(str2);
-				if(tmp_type != 4){
-					// Register
-					val[count] = get_register_num(str2);
-					type[count] = tmp_type;
-				}else{
-					type[count] = 4; // Raw value
-					// Value	
-					if(!memcmp(str2,"0x",2)){
-						// Hex
-						val[count] = strtol((char*)(((uint64_t)str2)+2),NULL,16);
-					}else if(!memcmp(str2,"0b",2)){
-						// Binary
-						val[count] = strtol((char*)(((uint64_t)str2)+2),NULL,2);
-					}else{
-						// Decimal
-						val[count] = strtol(str2,NULL,10);
-					}
-				}
-				index = i + 1;
-				count++;
-			}
-		}
-		if(count < 2){
+	if(!memcmp(&inst->name,"mov",3)){
+		if(inst->count < 2){
 			printf("Error in syntax!");
 			exit(1);
 		}
-		if(type[0] < 4 && type[1] == 4){
+		if(inst->types[0] < 4 && inst->types[1] == 4){
 			uint64_t start = 1;
 			
-			uint64_t reg = val[0];
-			uint64_t tmp_val = val[1];
+			uint64_t reg = inst->params[0];
+			uint64_t tmp_val = inst->params[1];
 
-			if(type[0] == 0)
+			if(inst->types[0] == 0)
 				buffer[0] = 0xb0 + reg;
-			if(type[0] == 1){
+			if(inst->types[0] == 1){
 				buffer[0] = 0x66; // cs.d prefix
 				buffer[1] = 0xb8 + reg;
 				start++;
 			}
-			if(type[0] == 2)
+			if(inst->types[0] == 2)
 				buffer[0] = 0xb8 + reg;
-			if(type[0] == 3){
+			if(inst->types[0] == 3){
 				buffer[0] = 0x48; // movabs prefix
 				buffer[1] = 0xb8 + reg;
 				start++;
 			}
 	
 			buffer[start] = (uint8_t) tmp_val;
-			if(type[0] >= 1)
+			if(inst->types[0] >= 1)
 				buffer[start+1] = (uint8_t) (tmp_val >> 8);
-			if(type[0] >= 2){
+			if(inst->types[0] >= 2){
 				buffer[start+2] = (uint8_t) (tmp_val >> 16);
 				buffer[start+3] = (uint8_t) (tmp_val >> 24);
 			}
-			if(type[0] == 3){
+			if(inst->types[0] == 3){
 				buffer[start+4] = (uint8_t) (tmp_val >> 32);
 				buffer[start+5] = (uint8_t) (tmp_val >> 40);
 				buffer[start+6] = (uint8_t) (tmp_val >> 48);
@@ -280,7 +233,69 @@ void parse_and_write_instruction(char* str, uint8_t* buffer){
 	}
 	return;
 }
+uint64_t count_instructions(char* buffer, uint64_t len){
+	uint64_t count = 0;
+	for(uint64_t i = 0; i < len; i++){
+		if(buffer[i] == '\n' || i == len - 1){
+			count++;
+		}
+	}
+	return count;
+}
+void parse_instructions(instruction_t* inst, char* buffer, uint64_t len){
+	uint64_t inst_index = 0;
+	uint64_t index = 0;
+	for(uint64_t i = 0; i < len; i++){
+		if(buffer[i] == '\n' || i == len - 1){
+			uint64_t tmp_len = i - index;
+			char* str = &buffer[index];
+			uint64_t i_index = 0;
+			uint64_t index2 = 0;
+			for(uint64_t i2 = 0; i2 < tmp_len; i2++){
+				if((str[i2] == ' ' && i_index == 0) || str[i2] == ',' || i2 == tmp_len-1){
+					if(i_index == 0){
+						memcpy(&inst[inst_index].name,str,3);
+					}else{
+						// Remove leading tabs and spaces
+						uint64_t new_index = index2;
+						for(; new_index < i; new_index++){
+							if(str[new_index] != ' ' && str[new_index] != '\t') break;
+						}
+						char* str2 = (char*)(((uint64_t)str)+new_index);
+						uint64_t tmp_type = get_register_size(str2);
+						if(tmp_type != 4){
+							// Register
+							inst[inst_index].params[i_index-1] = get_register_num(str2);
+							inst[inst_index].types[i_index-1] = tmp_type;
+						}else{
+							inst[inst_index].types[i_index-1] = 4; // Raw value
+							uint64_t val = 0;
+							// Value
+							if(!memcmp(str2,"0x",2)){
+								// Hex
+								val = strtol(&str2[2],NULL,16);
+							}else if(!memcmp(str2,"0b",2)){
+								// Binary
+								val = strtol(&str2[2],NULL,2);
+							}else{
+								// Decimal
+								val = strtol(str2,NULL,10);
+							}
+							inst[inst_index].params[i_index-1] = val;
+						}
+					}
 
+					i_index++;
+					index2 = i2 + 1;
+				}
+			}
+			inst[inst_index].count = i_index;
+			inst[inst_index].line = inst_index+1;
+			inst_index++;
+			index = i+1;
+		}
+	}
+}
 int main(){
 	FILE* src = fopen("asm/test_intel.asm", "r");
 	fseek(src, 0L, SEEK_END);
@@ -290,32 +305,23 @@ int main(){
 	fread(buffer,len,1,src);
 	fclose(src);
 	
-	uint64_t bin_len = 0;
-	uint64_t index = 0;
-	for(uint64_t i = 0; i < len; i++){
-		if(buffer[i] == '\n' || i == len - 1){
-			uint64_t tmp_len = i - index;
-			char* str = malloc(tmp_len);
-			memcpy(str,(char*)(((uint64_t)buffer)+index),tmp_len);
-			uint64_t inst_len = get_instruction_length(str);
-			bin_len += inst_len;
-			index = i+1;
-		}
-	}
-	index = 0;
-	uint64_t inst_index = 0;
-	uint8_t* bin_buffer = malloc(bin_len);
-	for(uint64_t i = 0; i < len; i++){
-		if(buffer[i] == '\n' || i == len - 1){
-			uint64_t tmp_len = i - index;
-			char* str = malloc(tmp_len);
-			memcpy(str,(char*)(((uint64_t)buffer)+index),tmp_len);
-			parse_and_write_instruction(str,(uint8_t*)(((uint64_t)bin_buffer)+inst_index));
-			index = i+1;
-			inst_index += get_instruction_length(str);
-		}
-	}
+	uint64_t inst_count = count_instructions(buffer, len);
+	instruction_t* instructions = (instruction_t*) malloc(sizeof(instruction_t)*inst_count);
+	parse_instructions(instructions, buffer, len);
 	
+	uint64_t bin_len = 0;
+	for(uint64_t i = 0; i < inst_count; i++){
+		bin_len += get_instruction_length(&instructions[i]);
+	}
+	uint8_t* bin_buffer = malloc(bin_len);
+	
+	uint64_t index = 0;
+
+	for(uint64_t i = 0; i < inst_count; i++){
+		write_instruction(&instructions[i], &bin_buffer[index]);
+		index += get_instruction_length(&instructions[i]);
+	}
+
 	uint64_t elen = elf_length(len);
 	uint8_t* elf_buffer = malloc(elen);
 	create_elf(elf_buffer,bin_buffer,bin_len);
