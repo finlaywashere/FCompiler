@@ -121,19 +121,23 @@ uint64_t get_instruction_length(instruction_t* inst){
 	if(!memcmp(&inst->name,"ret",3)) return 1;
 	return 0;
 }
-// 0 = 8 bit
-// 1 = 16 bit
-// 2 = 32 bit
-// 3 = 64 bit
-// 4 = not a register
+/*
+ Used to get the size of a register, now gets the data type of a string
+ 0 = 8 bit
+ 1 = 16 bit
+ 2 = 32 bit
+ 3 = 64 bit
+ 4 = value (uint64_t)
+ 5 = symbol
+*/
 uint64_t get_register_size(char* reg){
 	if(!memcmp(reg,"0x",2))
 		return 4;
 	char first = reg[0];
 	char second = reg[1];
-	if(first <= 'Z')
+	if(first <= 'Z' && first >= 'A')
 		first += 'z'-'Z';
-	if(second <= 'Z')
+	if(second <= 'Z' && first >= 'A')
 		second += 'z'-'Z';
 	if(first == 'e')
 		return 2;
@@ -144,14 +148,14 @@ uint64_t get_register_size(char* reg){
 	if(first == 'r'){
 		if(second >= 'a') return 3; // rax, rbx, rcx, etc
 		char third = reg[2];
-		if(third <= 'Z')
+		if(third <= 'Z' && third >= 'A')
 			third += 'z'-'Z';
 		if(third == 'l') return 0;
 		if(third == 'x') return 1;
 		if(third == 'd') return 2;
 		if(third >= '0' && third <= '5'){
 			char fourth = reg[3];
-			if(fourth <= 'Z')
+			if(fourth <= 'Z' && fourth >= 'A')
 				fourth += 'z'-'Z';
 			if(fourth == 'l') return 0;
 			if(fourth == 'x') return 1;
@@ -161,7 +165,8 @@ uint64_t get_register_size(char* reg){
 			return 3; // r8, or r9 with no suffix
 		}
 	}
-	return 4; // No register found
+	if(first >= '0' && first <= '9') return 4; // It starts with a number/0x/0b
+	return 5; // Its probably a symbol
 }
 uint64_t get_register_num(char* reg){
 	char identifier = reg[0];
@@ -278,24 +283,24 @@ void write_instruction(instruction_t* inst, uint8_t* buffer){
 		buffer[start] = 0xc0 + inst->params[0];
 	}
 	if(!memcmp(&inst->name,"dec",3)){
+		uint64_t start = 1;
 		if(inst->types[0] == 2){
 			buffer[0] = 0xff;
-			buffer[1] = 0xc8 + inst->params[0];
 		}
 		if(inst->types[0] == 0){
 			buffer[0] = 0xfe;
-			buffer[1] = 0xc0 + inst->params[0];
 		}
 		if(inst->types[0] == 1){
 			buffer[0] = 0x66;
 			buffer[1] = 0xff;
-			buffer[2] = 0xc8 + inst->params[0];
+			start = 2;
 		}
 		if(inst->types[0] == 3){
 			buffer[0] = 0x48;
 			buffer[1] = 0xff;
-			buffer[2] = 0xc8 + inst->params[0];
+			start = 2;
 		}
+		buffer[start] = 0xc8 + inst->params[0];
 	}
 	return;
 }

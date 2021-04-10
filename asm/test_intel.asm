@@ -1,5 +1,4 @@
 bits 64
-;asm intel
 mov eax, 10
 mov bx, 0x5
 mov cl, 0b11
