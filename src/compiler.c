@@ -29,19 +29,23 @@ void make_valid_header(elf_header_t* header){
 	header->program_header_size = 0x38;
 	header->segment_header_size = 0x40;
 }
-uint64_t elf_length(uint64_t data_length){
+uint64_t elf_length(uint64_t data_length, instruction_t *inst){
 	uint64_t len = 0;
 	for(uint64_t i = 0; i < SEGMENTS; i++){
 		len += strlen((char*) (((uint64_t)names)+len))+1;
 	}
-	uint64_t length = 0x40 + 0x40 * SEGMENTS + 0x38 * PROGRAMS + data_length + len;
+	uint64_t length = 0x40 + 0x40 * SEGMENTS + 0x38 * PROGRAMS;
+	
+	length += inst->origin - length;
+
+	length += + data_length + len;
 	return length;
 }
-void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length){
+void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instruction_t *inst){
 	elf_header_t *header = (elf_header_t*) malloc(sizeof(elf_header_t));
 	make_valid_header(header);
 	
-	uint64_t file_offset = elf_length(data_length)-data_length;
+	uint64_t file_offset = elf_length(data_length,inst)-data_length;
 	uint64_t str_len = file_offset - (0x40 + 0x40 * SEGMENTS + 0x38 * PROGRAMS);
 
 	header->program_header = 0x40; // Right after ELF header
@@ -106,6 +110,16 @@ uint64_t get_instruction_length(instruction_t* inst){
 		}
 	}
 	if(!memcmp(&inst->name,"pop",3) || !memcmp(&inst->name,"push",4)) return 1;
+	if(!memcmp(&inst->name,"call",4)){
+			switch(inst->types[0]){
+				case 3:
+					return 2;
+				case 4:
+					return 5;
+				case 5:
+					return 5;
+			}
+	}
 	if(!memcmp(&inst->name,"inc",3) || !memcmp(&inst->name,"dec",3)){
 		switch(inst->types[0]){
 			case 2:
@@ -211,7 +225,7 @@ uint64_t get_register_num(char* reg){
 	}
 	return 0;
 }
-void write_instruction(instruction_t* inst, uint8_t* buffer){
+void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 	if(!memcmp(&inst->name,"ret",3)){
 		buffer[0] = 0xC3;
 	}
@@ -302,6 +316,22 @@ void write_instruction(instruction_t* inst, uint8_t* buffer){
 		}
 		buffer[start] = 0xc8 + inst->params[0];
 	}
+	if(!memcmp(&inst->name,"call",4)){
+		if(inst->types[0] == 3){
+			// Register
+			buffer[0] = 0xff;
+			buffer[1] = 0xd0 + inst->params[0];
+		}else if(inst->types[0] >= 4){
+			// Address
+			buffer[0] = 0xe8;
+			uint64_t return_pointer = address + 5;
+			uint64_t new_pointer = inst->params[0] - return_pointer; // The new pointer to the call
+			buffer[1] = (uint8_t) new_pointer;
+			buffer[2] = (uint8_t) (new_pointer >> 8);
+			buffer[3] = (uint8_t) (new_pointer >> 16);
+			buffer[4] = (uint8_t) (new_pointer >> 24);
+		}
+	}
 	return;
 }
 uint64_t count_instructions(char* buffer, uint64_t len){
@@ -313,7 +343,7 @@ uint64_t count_instructions(char* buffer, uint64_t len){
 	}
 	return count;
 }
-void parse_instructions(instruction_t* inst, char* buffer, uint64_t len){
+void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_t count){
 	uint64_t inst_index = 0;
 	uint64_t index = 0;
 	for(uint64_t i = 0; i < len; i++){
@@ -367,6 +397,13 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len){
 			index = i+1;
 		}
 	}
+	inst->origin = 0x1000;
+	for(uint64_t i = 0; i < count; i++){
+		if(!memcmp(&inst[i].name,"org",3)){
+			if(inst[i].params[0] >= 0x1000)
+				inst->origin = inst[i].params[0]; // first instruction stores origin
+		}
+	}
 }
 int main(){
 	FILE* src = fopen("asm/test_intel.asm", "r");
@@ -379,7 +416,7 @@ int main(){
 	
 	uint64_t inst_count = count_instructions(buffer, len);
 	instruction_t* instructions = (instruction_t*) malloc(sizeof(instruction_t)*inst_count);
-	parse_instructions(instructions, buffer, len);
+	parse_instructions(instructions, buffer, len, inst_count);
 	
 	uint64_t bin_len = 0;
 	for(uint64_t i = 0; i < inst_count; i++){
@@ -387,16 +424,16 @@ int main(){
 	}
 	uint8_t* bin_buffer = malloc(bin_len);
 	
-	uint64_t index = 0;
+	uint64_t index = instructions->origin;
 
 	for(uint64_t i = 0; i < inst_count; i++){
-		write_instruction(&instructions[i], &bin_buffer[index]);
+		write_instruction(&instructions[i], &bin_buffer[index-instructions->origin], index);
 		index += get_instruction_length(&instructions[i]);
 	}
 
-	uint64_t elen = elf_length(len);
+	uint64_t elen = elf_length(len, instructions);
 	uint8_t* elf_buffer = malloc(elen);
-	create_elf(elf_buffer,bin_buffer,bin_len);
+	create_elf(elf_buffer,bin_buffer,bin_len,instructions);
 
 	FILE* fd = fopen("test.elf","w+");
 	fwrite(elf_buffer,elen,1,fd);

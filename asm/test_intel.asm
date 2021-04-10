@@ -1,4 +1,5 @@
 bits 64
+
 mov eax, 10
 mov bx, 0x5
 mov cl, 0b11
@@ -13,4 +14,6 @@ dec rcx
 inc al
 dec ah
 dec eax
+call 0x0
+call rax
 ret
