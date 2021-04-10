@@ -143,6 +143,7 @@ uint64_t get_instruction_length(instruction_t* inst){
  3 = 64 bit
  4 = value (uint64_t)
  5 = symbol
+ 6 = defining symbol
 */
 uint64_t get_register_size(char* reg){
 	if(!memcmp(reg,"0x",2))
@@ -343,6 +344,29 @@ uint64_t count_instructions(char* buffer, uint64_t len){
 	}
 	return count;
 }
+void group_symbols(instruction_t* inst, uint64_t len, char* buffer){
+	uint64_t curr_id = 1;
+	for(uint64_t i = 0; i < len; i++){
+		for(uint64_t i4 = 0; i4 < PARAMS; i4++){
+			if(inst[i].types[i4] != 5 && inst[i].types[i4] != 6) continue;
+			if(inst[i].params[i4] != 0) continue;
+			inst[i].params[i4] = curr_id;
+			char* str = &buffer[inst[i].s_start[i4]];
+			uint64_t s_len = inst[i].s_len[i4];
+			// Loop through each and mark all of the same symbols
+			for(uint64_t i2 = 0; i2 < len; i2++){
+				for(uint64_t i3 = 0; i3 < PARAMS; i3++){
+					if(inst[i2].types[i3] != 5 && inst[i2].types[i3] != 6) continue;
+					if(s_len != inst[i2].s_len[i3]) continue;
+					if(!memcmp(str,&buffer[inst[i2].s_start[i3]],s_len)){
+						inst[i2].params[i3] = curr_id;
+					}
+				}
+			}
+			curr_id++;
+		}
+	}
+}
 void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_t count){
 	uint64_t inst_index = 0;
 	uint64_t index = 0;
@@ -354,22 +378,22 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 			uint64_t i_index = 0;
 			uint64_t index2 = 0;
 			for(uint64_t i2 = 0; i2 < tmp_len; i2++){
-				if((str[i2] == ' ' && i_index == 0) || str[i2] == ',' || i2 == tmp_len-1){
-					if(i_index == 0){
-						memcpy(&inst[inst_index].name,str,tmp_len);
+				if((str[i2] == ' ' && i_index == 0) || str[i2] == ',' || str[i2] == '\t' || i2 == tmp_len-1){
+					if(i_index == 0 && str[i2] != ':'){
+						memcpy(&inst[inst_index].name,str,i2);
 					}else{
 						// Remove leading tabs and spaces
 						uint64_t new_index = index2;
 						for(; new_index < i; new_index++){
 							if(str[new_index] != ' ' && str[new_index] != '\t') break;
 						}
-						char* str2 = (char*)(((uint64_t)str)+new_index);
+						char* str2 = &str[new_index];
 						uint64_t tmp_type = get_register_size(str2);
-						if(tmp_type != 4){
+						if(tmp_type < 4){
 							// Register
 							inst[inst_index].params[i_index-1] = get_register_num(str2);
 							inst[inst_index].types[i_index-1] = tmp_type;
-						}else{
+						}else if(tmp_type == 4){
 							inst[inst_index].types[i_index-1] = 4; // Raw value
 							uint64_t val = 0;
 							// Value
@@ -384,6 +408,17 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 								val = strtol(str2,NULL,10);
 							}
 							inst[inst_index].params[i_index-1] = val;
+						}else if(tmp_type == 5){
+							inst[inst_index].types[i_index-1] = 5; // Symbol
+							inst[inst_index].s_start[i_index-1] = new_index+index;
+							inst[inst_index].s_len[i_index-1] = i2-new_index+1;
+						}
+						if(str[i2] == ':'){
+							// label
+							memcpy(&inst[inst_index].name,"label",5);
+							inst[inst_index].types[0] = 6; // set first type to symbol
+							inst[inst_index].s_start[0] = new_index+index;
+							inst[inst_index].s_len[0] = i2-new_index;
 						}
 					}
 
@@ -403,6 +438,7 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 			inst->origin = inst[i].params[0]; // first instruction stores origin
 		}
 	}
+	group_symbols(inst, inst_index, buffer);
 }
 int main(){
 	FILE* src = fopen("asm/test_intel.asm", "r");
@@ -416,7 +452,7 @@ int main(){
 	uint64_t inst_count = count_instructions(buffer, len);
 	instruction_t* instructions = (instruction_t*) malloc(sizeof(instruction_t)*inst_count);
 	parse_instructions(instructions, buffer, len, inst_count);
-	
+
 	uint64_t bin_len = 0;
 	for(uint64_t i = 0; i < inst_count; i++){
 		bin_len += get_instruction_length(&instructions[i]);

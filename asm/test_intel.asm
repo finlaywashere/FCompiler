@@ -14,6 +14,7 @@ dec rcx
 inc al
 dec ah
 dec eax
-call 0x401050
+call .test
+.test:
 call rax
 ret
