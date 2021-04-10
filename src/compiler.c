@@ -401,6 +401,26 @@ void group_symbols(instruction_t* inst, uint64_t len, char* buffer){
 			curr_id++;
 		}
 	}
+	inst->symbols = curr_id;
+}
+void find_symbols_and_replace(instruction_t* inst, uint64_t len){
+	for(uint64_t id = 1; id < inst->symbols; id++){
+		for(uint64_t i = 0; i < len; i++){
+			for(uint64_t p = 0; p < PARAMS; p++){
+				if(inst[i].types[p] != 6) continue;
+				uint64_t address = inst[i].address;
+				uint64_t symbol = inst[i].params[p];
+				for(uint64_t i2 = 0; i2 < len; i2++){
+					for(uint64_t p2 = 0; p2 < len; p2++){
+						if(inst[i2].types[p2] != 5) continue;
+						if(inst[i2].params[p2] != symbol) continue;
+						inst[i2].types[p2] = 4; // Set to raw value
+						inst[i2].params[p2] = address; // Set address
+					}
+				}
+			}
+		}
+	}
 }
 void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_t count){
 	uint64_t inst_index = 0;
@@ -456,7 +476,6 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 							inst[inst_index].s_len[0] = i2-new_index;
 						}
 					}
-
 					i_index++;
 					index2 = i2 + 1;
 				}
@@ -473,7 +492,13 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 			inst->origin = inst[i].params[0]; // first instruction stores origin
 		}
 	}
-	group_symbols(inst, inst_index, buffer);
+	uint64_t address = inst->origin;
+	for(uint64_t i = 0; i < count; i++){
+		inst[i].address = address;
+		address += get_instruction_length(&inst[i]);
+	}
+	group_symbols(inst, count, buffer);
+	find_symbols_and_replace(inst,count);
 }
 int main(){
 	FILE* src = fopen("asm/test_intel.asm", "r");

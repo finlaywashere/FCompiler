@@ -19,7 +19,9 @@ struct instruction{
 	uint64_t s_len[PARAMS];
 	uint64_t line;
 	uint64_t count;
+	uint64_t address;
 	uint64_t origin;
+	uint64_t symbols;
 };
 typedef struct instruction instruction_t;
 
@@ -33,5 +35,5 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address);
 void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_t count);
 uint64_t count_instructions(char* buffer, uint64_t len);
 void group_symbols(instruction_t* inst, uint64_t len, char* buffer);
-
+void find_symbols_and_replace(instruction_t* inst, uint64_t len);
 
