@@ -14,7 +14,7 @@ struct instruction{
 typedef struct instruction instruction_t;
 
 void make_valid_header(elf_header_t* header);
-uint64_t elf_length(uint64_t data_length, instruction_t* inst);
+uint64_t elf_length(uint64_t data_length);
 void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instruction_t* inst);
 uint64_t get_instruction_length(instruction_t* inst);
 uint64_t get_register_size(char* reg);

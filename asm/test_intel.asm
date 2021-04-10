@@ -14,6 +14,6 @@ dec rcx
 inc al
 dec ah
 dec eax
-call 0x0
+call 0x401050
 call rax
 ret

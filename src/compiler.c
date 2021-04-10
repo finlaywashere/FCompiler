@@ -29,14 +29,14 @@ void make_valid_header(elf_header_t* header){
 	header->program_header_size = 0x38;
 	header->segment_header_size = 0x40;
 }
-uint64_t elf_length(uint64_t data_length, instruction_t *inst){
+uint64_t elf_length(uint64_t data_length){
 	uint64_t len = 0;
 	for(uint64_t i = 0; i < SEGMENTS; i++){
 		len += strlen((char*) (((uint64_t)names)+len))+1;
 	}
 	uint64_t length = 0x40 + 0x40 * SEGMENTS + 0x38 * PROGRAMS;
 	
-	length += inst->origin - length;
+	length += 0x1000 - length;
 
 	length += + data_length + len;
 	return length;
@@ -45,14 +45,14 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instructio
 	elf_header_t *header = (elf_header_t*) malloc(sizeof(elf_header_t));
 	make_valid_header(header);
 	
-	uint64_t file_offset = elf_length(data_length,inst)-data_length;
+	uint64_t file_offset = elf_length(data_length)-data_length;
 	uint64_t str_len = file_offset - (0x40 + 0x40 * SEGMENTS + 0x38 * PROGRAMS);
 
 	header->program_header = 0x40; // Right after ELF header
 	header->num_program_headers = PROGRAMS;
 	header->segment_header = 0x40 + 0x38 * PROGRAMS; // Right after program headers
 	header->num_segment_headers = SEGMENTS;
-	header->entry_point = file_offset;
+	header->entry_point = inst->origin;
 	header->segment_header_name_index = SEGMENTS-1;
 
 	program_header_t* programs = (program_header_t*) malloc(sizeof(program_header_t)*PROGRAMS);
@@ -67,7 +67,7 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instructio
 
 	programs[0].type = PROGRAM_LOAD;
 	programs[0].offset = file_offset;
-	programs[0].virtual_address = file_offset;
+	programs[0].virtual_address = inst->origin;
 	programs[0].file_size = data_length;
 	programs[0].memory_size = data_length;
 	programs[0].flags = 0x5;
@@ -75,7 +75,7 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instructio
 	
 	segments[1].type = SEGMENT_PROGRAM;
 	segments[1].flags = SEGMENT_FLAG_EXEC | SEGMENT_FLAG_ALLOC;
-	segments[1].mem_address = file_offset;
+	segments[1].mem_address = inst->origin;
 	segments[1].file_offset = file_offset;
 	segments[1].file_size = data_length;
 
@@ -397,11 +397,10 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 			index = i+1;
 		}
 	}
-	inst->origin = 0x1000;
+	inst->origin = 0x401000;
 	for(uint64_t i = 0; i < count; i++){
 		if(!memcmp(&inst[i].name,"org",3)){
-			if(inst[i].params[0] >= 0x1000)
-				inst->origin = inst[i].params[0]; // first instruction stores origin
+			inst->origin = inst[i].params[0]; // first instruction stores origin
 		}
 	}
 }
@@ -431,7 +430,7 @@ int main(){
 		index += get_instruction_length(&instructions[i]);
 	}
 
-	uint64_t elen = elf_length(len, instructions);
+	uint64_t elen = elf_length(len);
 	uint8_t* elf_buffer = malloc(elen);
 	create_elf(elf_buffer,bin_buffer,bin_len,instructions);
 
