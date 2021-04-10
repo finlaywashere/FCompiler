@@ -96,7 +96,7 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instructio
 }
 uint64_t get_instruction_length(instruction_t* inst){
 	if(!memcmp(&inst->name,"mov",3)){
-		if(inst->types[1] == 4){
+		if(inst->types[0] < 4 && (inst->types[1] == 4 || inst->types[1] == 5)){ // If it is type 4 then it is a value, if it is type 5 then it is a symbol that will be substituted in as a value
 			switch(inst->types[0]){
 				case 0:
 					return 2;
@@ -107,7 +107,7 @@ uint64_t get_instruction_length(instruction_t* inst){
 				case 3:
 					return 10; // Factor in prefix length
 			}
-		}else if(inst->types[1] < 4){
+		}else if(inst->types[0] < 4 && inst->types[1] < 4){
 			switch(inst->types[0]){
 				case 0:
 					return 2;
@@ -117,6 +117,17 @@ uint64_t get_instruction_length(instruction_t* inst){
 					return 2;
 				case 3:
 					return 3; // Factor in prefix length
+			}
+		}else if(inst->types[0] < 4 && (inst->types[1] == 7 || inst->types[1] == 8)){ // If it is type 7 then it is an address, if it is type 8 then it is a symbol that will be substituted in as an address
+			switch(inst->types[0]){
+				case 0:
+					return 7;
+				case 1:
+					return 8; // Factor in prefix length
+				case 2:
+					return 7;
+				case 3:
+					return 8; // Factor in prefix length
 			}
 		}
 	}
@@ -155,6 +166,8 @@ uint64_t get_instruction_length(instruction_t* inst){
  4 = value (uint64_t)
  5 = symbol
  6 = defining symbol
+ 7 = address
+ 8 = symbol address
 */
 uint64_t get_register_size(char* reg){
 	if(!memcmp(reg,"0x",2))
@@ -163,7 +176,7 @@ uint64_t get_register_size(char* reg){
 	char second = reg[1];
 	if(first <= 'Z' && first >= 'A')
 		first += 'z'-'Z';
-	if(second <= 'Z' && first >= 'A')
+	if(second <= 'Z' && second >= 'A')
 		second += 'z'-'Z';
 	if(first == 'e')
 		return 2;
@@ -192,6 +205,10 @@ uint64_t get_register_size(char* reg){
 		}
 	}
 	if(first >= '0' && first <= '9') return 4; // It starts with a number/0x/0b
+	if(first == '['){
+		if(second >= '0' && second <= '9') return 7; // It starts with [ then a number so its an address to read from
+		return 8; // Its a symbol in address brackets
+	}
 	return 5; // Its probably a symbol
 }
 uint64_t get_register_num(char* reg){
@@ -247,6 +264,7 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 			exit(1);
 		}
 		if(inst->types[0] < 4 && inst->types[1] == 4){
+			// Static number to register
 			uint64_t start = 1;
 			
 			uint64_t reg = inst->params[0];
@@ -282,6 +300,7 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 			}
 		}
 		if(inst->types[0] < 4 && inst->types[1] < 4){
+			// Register to register
 			if(inst->types[0] != inst->types[1]){
 				printf("Error in syntax");
 				exit(2);
@@ -304,6 +323,45 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 				buffer[0] = 0x88;
 			}
 			buffer[start] = 0xc0 + (inst->params[1] * 8) + inst->params[0];
+		}
+		if(inst->types[0] < 4 && inst->types[1] == 7){
+			// Memory to register
+			uint64_t start = 3;
+			if(inst->types[0] == 2){
+				buffer[0] = 0x8b; // Opcode
+				buffer[1] = 0x04 + 8 * inst->params[0]; // Register number
+				buffer[2] = 0x25;
+			}
+			if(inst->types[0] == 1){
+				buffer[0] = 0x66;
+				buffer[1] = 0x8b;
+				buffer[2] = 0x04 + 8 * inst->params[0];
+				buffer[3] = 0x25;
+				start = 4;
+			}
+			if(inst->types[0] == 3){
+				buffer[0] = 0x48;
+				buffer[1] = 0x8b;
+				buffer[2] = 0x04 + 8 * inst->params[0];
+				buffer[3] = 0x25;
+				start = 4;
+			}
+			if(inst->types[0] == 0){
+				buffer[0] = 0x8a;
+				buffer[1] = 0x04 + 8 * inst->params[0];
+				buffer[2] = 0x25;
+			}
+
+			buffer[start] = (uint8_t) (inst->params[1]);
+			buffer[start+1] = (uint8_t) (inst->params[1] >> 8);
+			buffer[start+2] = (uint8_t) (inst->params[1] >> 16);
+			buffer[start+3] = (uint8_t) (inst->params[1] >> 24);
+			if(inst->types[0] == 3){
+				buffer[start+4] = (uint8_t) (inst->params[1] >> 32);
+				buffer[start+5] = (uint8_t) (inst->params[1] >> 40);
+				buffer[start+6] = (uint8_t) (inst->params[1] >> 48);
+				buffer[start+7] = (uint8_t) (inst->params[1] >> 56);
+			}
 		}
 	}
 	if(!memcmp(&inst->name,"pop",3)){
@@ -383,15 +441,14 @@ void group_symbols(instruction_t* inst, uint64_t len, char* buffer){
 	uint64_t curr_id = 1;
 	for(uint64_t i = 0; i < len; i++){
 		for(uint64_t i4 = 0; i4 < PARAMS; i4++){
-			if(inst[i].types[i4] != 5 && inst[i].types[i4] != 6) continue;
-			if(inst[i].params[i4] != 0) continue;
+			if(inst[i].types[i4] != 6) continue;
 			inst[i].params[i4] = curr_id;
 			char* str = &buffer[inst[i].s_start[i4]];
 			uint64_t s_len = inst[i].s_len[i4];
 			// Loop through each and mark all of the same symbols
 			for(uint64_t i2 = 0; i2 < len; i2++){
 				for(uint64_t i3 = 0; i3 < PARAMS; i3++){
-					if(inst[i2].types[i3] != 5 && inst[i2].types[i3] != 6) continue;
+					if(inst[i2].types[i3] != 5 && inst[i2].types[i3] != 8) continue;
 					if(s_len != inst[i2].s_len[i3]) continue;
 					if(!memcmp(str,&buffer[inst[i2].s_start[i3]],s_len)){
 						inst[i2].params[i3] = curr_id;
@@ -412,9 +469,12 @@ void find_symbols_and_replace(instruction_t* inst, uint64_t len){
 				uint64_t symbol = inst[i].params[p];
 				for(uint64_t i2 = 0; i2 < len; i2++){
 					for(uint64_t p2 = 0; p2 < len; p2++){
-						if(inst[i2].types[p2] != 5) continue;
+						if(inst[i2].types[p2] != 5 && inst[i2].types[p2] != 8) continue;
 						if(inst[i2].params[p2] != symbol) continue;
-						inst[i2].types[p2] = 4; // Set to raw value
+						if(inst[i2].types[p2] == 5)
+							inst[i2].types[p2] = 4; // Set to raw value
+						if(inst[i2].types[p2] == 8)
+							inst[i2].types[p2] = 7; // Set to address
 						inst[i2].params[p2] = address; // Set address
 					}
 				}
@@ -463,10 +523,26 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 								val = strtol(str2,NULL,10);
 							}
 							inst[inst_index].params[i_index-1] = val;
-						}else if(tmp_type == 5){
-							inst[inst_index].types[i_index-1] = 5; // Symbol
+						}else if(tmp_type == 5 || tmp_type == 8){
+							inst[inst_index].types[i_index-1] = tmp_type; // Symbol
 							inst[inst_index].s_start[i_index-1] = new_index+index;
 							inst[inst_index].s_len[i_index-1] = i2-new_index+1;
+						}else if(tmp_type == 7){
+							// Its an address to read/write from/to
+							inst[inst_index].types[i_index-1] = 7; // Raw value
+                            uint64_t val = 0;
+                            // Value
+                            if(!memcmp(str2,"[0x",2)){
+                                // Hex
+                                val = strtol(&str2[3],NULL,16);
+                            }else if(!memcmp(str2,"[0b",2)){
+                                // Binary
+                                val = strtol(&str2[3],NULL,2);
+                            }else{
+                                // Decimal
+                                val = strtol(&str2[1],NULL,10);
+                            }
+                            inst[inst_index].params[i_index-1] = val;
 						}
 						if(str[i2] == ':'){
 							// label
