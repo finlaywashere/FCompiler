@@ -96,17 +96,28 @@ void create_elf(uint8_t* buffer, uint8_t* data, uint64_t data_length, instructio
 }
 uint64_t get_instruction_length(instruction_t* inst){
 	if(!memcmp(&inst->name,"mov",3)){
-		switch(inst->types[0]){
-			case 0:
-				return 2;
-			case 1:
-				return 4; // Factor in prefix length
-			case 2:
-				return 5;
-			case 3:
-				return 10; // Factor in prefix length
-			case 5:
-				return 2;
+		if(inst->types[1] == 4){
+			switch(inst->types[0]){
+				case 0:
+					return 2;
+				case 1:
+					return 4; // Factor in prefix length
+				case 2:
+					return 5;
+				case 3:
+					return 10; // Factor in prefix length
+			}
+		}else if(inst->types[1] < 4){
+			switch(inst->types[0]){
+				case 0:
+					return 2;
+				case 1:
+					return 3; // Factor in prefix length
+				case 2:
+					return 2;
+				case 3:
+					return 3; // Factor in prefix length
+			}
 		}
 	}
 	if(!memcmp(&inst->name,"pop",3) || !memcmp(&inst->name,"push",4)) return 1;
@@ -269,6 +280,30 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 				buffer[start+6] = (uint8_t) (tmp_val >> 48);
 				buffer[start+7] = (uint8_t) (tmp_val >> 56);
 			}
+		}
+		if(inst->types[0] < 4 && inst->types[1] < 4){
+			if(inst->types[0] != inst->types[1]){
+				printf("Error in syntax");
+				exit(2);
+			}
+			uint64_t start = 1;
+			if(inst->types[0] == 2){
+				buffer[0] = 0x89;
+			}
+			if(inst->types[0] == 3){
+				buffer[0] = 0x48;
+				buffer[1] = 0x89;
+				start = 2;
+			}
+			if(inst->types[0] == 1){
+				buffer[0] = 0x66;
+				buffer[1] = 0x89;
+				start = 2;
+			}
+			if(inst->types[0] == 0){
+				buffer[0] = 0x88;
+			}
+			buffer[start] = 0xc0 + (inst->params[1] * 8) + inst->params[0];
 		}
 	}
 	if(!memcmp(&inst->name,"pop",3)){
