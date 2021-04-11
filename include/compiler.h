@@ -36,4 +36,5 @@ void parse_instructions(instruction_t* inst, char* buffer, uint64_t len, uint64_
 uint64_t count_instructions(char* buffer, uint64_t len);
 void group_symbols(instruction_t* inst, uint64_t len, char* buffer);
 void find_symbols_and_replace(instruction_t* inst, uint64_t len);
+void write_int_to_buffer(uint64_t i, uint8_t* buffer, uint64_t type);
 

@@ -13,6 +13,9 @@ mov cl, [0x1000]
 mov ax, [0x1001]
 mov ebx, [0x2000]
 mov rdx, [0x4003]
+mov [0x1000], eax
+mov [0x1000], cx
+mov [0x1000], al
 mov ah, 0x1
 push rbx
 pop rax

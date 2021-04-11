@@ -254,6 +254,21 @@ uint64_t get_register_num(char* reg){
 	}
 	return 0;
 }
+void write_int_to_buffer(uint64_t i, uint8_t* buffer, uint64_t type){
+	buffer[0] = (uint8_t) i;
+	if(type >= 1)
+		buffer[1] = (uint8_t) (i >> 8);
+	if(type >= 2){
+		buffer[2] = (uint8_t) (i >> 16);
+		buffer[3] = (uint8_t) (i >> 24);
+	}
+	if(type == 3){
+		buffer[4] = (uint8_t) (i >> 32);
+		buffer[5] = (uint8_t) (i >> 40);
+		buffer[6] = (uint8_t) (i >> 48);
+		buffer[7] = (uint8_t) (i >> 56);
+	}
+}
 void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 	if(!memcmp(&inst->name,"ret",3)){
 		buffer[0] = 0xC3;
@@ -263,105 +278,63 @@ void write_instruction(instruction_t* inst, uint8_t* buffer, uint64_t address){
 			printf("Error in syntax!");
 			exit(1);
 		}
+		uint64_t max_size = 0;
+		for(uint64_t i = 0; i < PARAMS; i++){
+			if(inst->types[i] > max_size && inst->types[i] <= 3)
+				max_size = inst->types[i];
+		}
+		uint64_t start = 0;
+		if(max_size == 3){
+			buffer[0] = 0x48; // 64 bit prefix
+			start = 1;
+		}
+		if(max_size == 1){
+			buffer[0] = 0x66; // 16 bit prefix
+			start = 1;
+		}
+		uint64_t type = 0; // 0 = data, 1 = register, 2 = memory
+		uint64_t value = inst->params[1];
 		if(inst->types[0] < 4 && inst->types[1] == 4){
-			// Static number to register
-			uint64_t start = 1;
-			
-			uint64_t reg = inst->params[0];
-			uint64_t tmp_val = inst->params[1];
-
+			uint64_t opcode = 0xb8;
 			if(inst->types[0] == 0)
-				buffer[0] = 0xb0 + reg;
-			if(inst->types[0] == 1){
-				buffer[0] = 0x66; // cs.d prefix
-				buffer[1] = 0xb8 + reg;
-				start++;
-			}
-			if(inst->types[0] == 2)
-				buffer[0] = 0xb8 + reg;
-			if(inst->types[0] == 3){
-				buffer[0] = 0x48; // movabs prefix
-				buffer[1] = 0xb8 + reg;
-				start++;
-			}
-	
-			buffer[start] = (uint8_t) tmp_val;
-			if(inst->types[0] >= 1)
-				buffer[start+1] = (uint8_t) (tmp_val >> 8);
-			if(inst->types[0] >= 2){
-				buffer[start+2] = (uint8_t) (tmp_val >> 16);
-				buffer[start+3] = (uint8_t) (tmp_val >> 24);
-			}
-			if(inst->types[0] == 3){
-				buffer[start+4] = (uint8_t) (tmp_val >> 32);
-				buffer[start+5] = (uint8_t) (tmp_val >> 40);
-				buffer[start+6] = (uint8_t) (tmp_val >> 48);
-				buffer[start+7] = (uint8_t) (tmp_val >> 56);
-			}
-		}
-		if(inst->types[0] < 4 && inst->types[1] < 4){
-			// Register to register
-			if(inst->types[0] != inst->types[1]){
-				printf("Error in syntax");
-				exit(2);
-			}
-			uint64_t start = 1;
-			if(inst->types[0] == 2){
-				buffer[0] = 0x89;
-			}
-			if(inst->types[0] == 3){
-				buffer[0] = 0x48;
-				buffer[1] = 0x89;
-				start = 2;
-			}
-			if(inst->types[0] == 1){
-				buffer[0] = 0x66;
-				buffer[1] = 0x89;
-				start = 2;
-			}
-			if(inst->types[0] == 0){
-				buffer[0] = 0x88;
-			}
+				opcode = 0xb0;
+			buffer[start] = opcode + inst->params[0];
+			type = 0;
+		}else if(inst->types[0] < 4 && inst->types[1] < 4){
+			uint64_t opcode = 0x89;
+			if(inst->types[0] == 0)
+				opcode = 0x88;
+			buffer[start] = opcode;
+			start++;
 			buffer[start] = 0xc0 + (inst->params[1] * 8) + inst->params[0];
+			type = 1;
+		}else if(inst->types[0] < 4 && inst->types[1] == 7){
+			uint64_t opcode = 0x8b;
+			if(inst->types[0] == 0)
+				opcode = 0x8a;
+			buffer[start] = opcode;
+			start++;
+			buffer[start] = 0x04 + 8 * inst->params[0];
+			start++;
+			buffer[start] = 0x25;
+			type = 2;
+		}else if(inst->types[0] == 7 && inst->types[1] < 4){
+			uint64_t opcode = 0x89;
+			if(inst->types[0])
+				opcode = 0x88;
+			buffer[start] = opcode;
+			start++;
+			buffer[start] = 0x04 + 8 * inst->params[0];
+			start++;
+			buffer[start] = 0x25;
 		}
-		if(inst->types[0] < 4 && inst->types[1] == 7){
-			// Memory to register
-			uint64_t start = 3;
-			if(inst->types[0] == 2){
-				buffer[0] = 0x8b; // Opcode
-				buffer[1] = 0x04 + 8 * inst->params[0]; // Register number
-				buffer[2] = 0x25;
-			}
-			if(inst->types[0] == 1){
-				buffer[0] = 0x66;
-				buffer[1] = 0x8b;
-				buffer[2] = 0x04 + 8 * inst->params[0];
-				buffer[3] = 0x25;
-				start = 4;
-			}
-			if(inst->types[0] == 3){
-				buffer[0] = 0x48;
-				buffer[1] = 0x8b;
-				buffer[2] = 0x04 + 8 * inst->params[0];
-				buffer[3] = 0x25;
-				start = 4;
-			}
-			if(inst->types[0] == 0){
-				buffer[0] = 0x8a;
-				buffer[1] = 0x04 + 8 * inst->params[0];
-				buffer[2] = 0x25;
-			}
-
-			buffer[start] = (uint8_t) (inst->params[1]);
-			buffer[start+1] = (uint8_t) (inst->params[1] >> 8);
-			buffer[start+2] = (uint8_t) (inst->params[1] >> 16);
-			buffer[start+3] = (uint8_t) (inst->params[1] >> 24);
-			if(inst->types[0] == 3){
-				buffer[start+4] = (uint8_t) (inst->params[1] >> 32);
-				buffer[start+5] = (uint8_t) (inst->params[1] >> 40);
-				buffer[start+6] = (uint8_t) (inst->params[1] >> 48);
-				buffer[start+7] = (uint8_t) (inst->params[1] >> 56);
-			}
+		start++;
+		if(type == 0){
+			write_int_to_buffer(value,&buffer[start],inst->types[0]);
+		}else if(type == 1){
+			buffer[start] = 0xc0 + (inst->params[1] * 8) + inst->params[0];
+		}else if(type == 2){
+			write_int_to_buffer(value,&buffer[start],2);
 		}
 	}
 	if(!memcmp(&inst->name,"pop",3)){
@@ -594,7 +567,8 @@ int main(){
 		bin_len += get_instruction_length(&instructions[i]);
 	}
 	uint8_t* bin_buffer = malloc(bin_len);
-	
+	memset(bin_buffer,0,bin_len);
+
 	uint64_t index = instructions->origin;
 
 	for(uint64_t i = 0; i < inst_count; i++){
